@@ -82,6 +82,11 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
     regularization : float, default=0.5
         Laplace smoothing added to event / non-event counts per bin to avoid
         division by zero and infinite WOE on pure bins.
+    forbidden_features : list[str] | None, default=None
+        Columns that are not permitted as inputs for this model (regulatory
+        guardrail). If any appear in X during fit, fit raises ValueError. Leave
+        None where the columns are allowed — e.g. state_code is forbidden for PD
+        but permitted for LGD, so only the PD pipeline passes it.
 
     Attributes
     ----------
@@ -102,6 +107,7 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
         woe_clip: float = 3.0,
         rare_threshold: float = 0.02,
         regularization: float = 0.5,
+        forbidden_features: list[str] | None = None,
     ) -> None:
         self.n_bins = n_bins
         self.categorical_features = categorical_features
@@ -109,12 +115,31 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
         self.woe_clip = woe_clip
         self.rare_threshold = rare_threshold
         self.regularization = regularization
+        self.forbidden_features = forbidden_features
 
     # ------------------------------------------------------------------ #
     # Fit
     # ------------------------------------------------------------------ #
 
     def fit(self, X: pd.DataFrame | np.ndarray, y: np.ndarray | pd.Series) -> WOEEncoder:
+        """Fit per-feature WOE/IV mappings from the binary target.
+
+        Parameters
+        ----------
+        X : pd.DataFrame | np.ndarray
+            Feature matrix. DataFrame column names are preserved; an ndarray
+            gets generated names ``x0, x1, ...``. Column dtype drives automatic
+            continuous/categorical detection unless overridden via the
+            ``categorical_features`` / ``continuous_features`` parameters.
+        y : np.ndarray | pd.Series
+            Binary target where ``1`` == event (default) and ``0`` == non-event.
+            Boolean targets are accepted; any other values raise ``ValueError``.
+
+        Returns
+        -------
+        WOEEncoder
+            The fitted encoder (``self``), to support method chaining.
+        """
         if self.n_bins < 2:
             raise ValueError(f"n_bins must be >= 2; got {self.n_bins}")
         if not 0.0 <= self.rare_threshold < 1.0:
@@ -125,6 +150,17 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
 
         self.feature_names_in_ = np.asarray(X.columns, dtype=object)
         self.n_features_in_ = X.shape[1]
+
+        if self.forbidden_features:
+            present = [c for c in self.forbidden_features if c in set(X.columns)]
+            if present:
+                raise ValueError(
+                    f"Forbidden features present for this model: {present}. "
+                    "Per regulatory guardrails (governance.forbidden_features), "
+                    "these columns must not be used as model inputs. Drop them, or "
+                    "omit them from forbidden_features if they are permitted here "
+                    "(e.g. state_code is allowed for LGD but forbidden for PD)."
+                )
 
         cat_cols, cont_cols = self._resolve_feature_types(X)
         self._categorical_features_: list[str] = cat_cols
@@ -285,6 +321,22 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
     # ------------------------------------------------------------------ #
 
     def transform(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
+        """Replace raw values with their fitted Weight-of-Evidence.
+
+        Parameters
+        ----------
+        X : pd.DataFrame | np.ndarray
+            Data containing the columns seen during fit. Unseen categories map
+            to the "other" WOE, out-of-range continuous values clamp to the edge
+            bins, and NaNs map to the dedicated NaN WOE.
+
+        Returns
+        -------
+        np.ndarray
+            Float array of shape ``(n_samples, n_features_in_)`` with column
+            order equal to ``feature_names_in_``. With
+            ``set_output(transform="pandas")`` a named DataFrame is returned.
+        """
         check_is_fitted(self, "feature_woe_")
         X = self._to_frame(X)
         self._check_columns(X)
@@ -357,6 +409,19 @@ class WOEEncoder(BaseEstimator, TransformerMixin):
         return "strong"
 
     def get_feature_names_out(self, input_features=None) -> np.ndarray:
+        """Return the output feature names, one per input column ("<col>_woe").
+
+        Parameters
+        ----------
+        input_features : ignored
+            Accepted only for scikit-learn API compatibility; the encoder uses
+            the column names captured during fit.
+
+        Returns
+        -------
+        np.ndarray
+            Array of output feature names aligned with ``feature_names_in_``.
+        """
         check_is_fitted(self, "feature_woe_")
         return np.asarray([f"{name}_woe" for name in self.feature_names_in_], dtype=object)
 

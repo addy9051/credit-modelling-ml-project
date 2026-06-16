@@ -80,21 +80,21 @@ def test_iv_non_negative(credit_like_data):
 
 
 def test_woe_distribution_sum_property(credit_like_data):
-    """Σ (dist_bad_i - dist_good_i) == 0 over all bins (distributions sum to 1)."""
+    """Σ (dist_bad_i - dist_good_i) == 0 across bins (each is a probability distribution)."""
     X, y = credit_like_data
     enc = WOEEncoder(n_bins=10, regularization=0.0).fit(X, y)
 
-    values = pd.to_numeric(X["cibil_score"]).to_numpy(dtype=float)
+    # Rows in the same bin share the same encoded WOE, so the bin partition is
+    # recoverable from the public transform() output alone — no internals needed.
+    col = list(enc.get_feature_names_out()).index("cibil_score_woe")
+    woe_col = enc.transform(X)[:, col]
     total_events = float(y.sum())
     total_non_events = float(len(y) - total_events)
 
-    fw = enc.feature_woe_["cibil_score"]
-    bin_idx = np.digitize(values, fw.cut_points, right=False)
     dist_diff = 0.0
-    for b in range(len(fw.bin_woe)):
-        in_bin = bin_idx == b
-        events = y[in_bin].sum()
-        non_events = in_bin.sum() - events
+    for _, ys in pd.DataFrame({"woe": woe_col, "y": y}).groupby("woe")["y"]:
+        events = float(ys.sum())
+        non_events = float(len(ys) - events)
         dist_diff += events / total_events - non_events / total_non_events
     assert abs(dist_diff) < 1e-9
 
@@ -109,12 +109,14 @@ def test_cibil_is_predictive(credit_like_data):
 
 
 def test_woe_monotonic_direction(credit_like_data):
-    """Higher CIBIL bins (lower risk) should carry higher WOE than low bins."""
+    """Lower CIBIL scores (higher risk) should encode to lower WOE than higher scores."""
     X, y = credit_like_data
     enc = WOEEncoder(n_bins=10).fit(X, y)
-    fw = enc.feature_woe_["cibil_score"]
-    # not strictly monotonic, but lowest-score bin should have lower WOE than highest
-    assert fw.bin_woe[0] < fw.bin_woe[-1]
+    col = list(enc.get_feature_names_out()).index("cibil_score_woe")
+
+    low_woe = enc.transform(X.nsmallest(50, "cibil_score"))[:, col].mean()
+    high_woe = enc.transform(X.nlargest(50, "cibil_score"))[:, col].mean()
+    assert low_woe < high_woe
 
 
 # --------------------------------------------------------------------------- #
@@ -125,16 +127,15 @@ def test_woe_monotonic_direction(credit_like_data):
 def test_unseen_category_maps_to_other(credit_like_data):
     X, y = credit_like_data
     enc = WOEEncoder().fit(X, y)
+    seg_col = list(enc.get_feature_names_out()).index("borrower_segment_woe")
 
     X_new = X.head(5).copy()
     X_new["borrower_segment"] = ["salaried", "self_employed", "msme", "ASTRONAUT", "PIRATE"]
-    out = enc.transform(X_new)  # must not raise
+    out = enc.transform(X_new)  # must not raise on unseen categories
 
-    seg_col = list(enc.feature_names_in_).index("borrower_segment")
-    other_woe = enc.feature_woe_["borrower_segment"].other_woe
-    # unseen categories (rows 3, 4) take the "other" WOE
-    assert out[3, seg_col] == pytest.approx(other_woe)
-    assert out[4, seg_col] == pytest.approx(other_woe)
+    # both unseen categories (rows 3, 4) collapse to the same "other" WOE
+    assert out[3, seg_col] == pytest.approx(out[4, seg_col])
+    assert np.isfinite(out[:, seg_col]).all()
 
 
 def test_rare_categories_merged_into_other():
@@ -145,10 +146,12 @@ def test_rare_categories_merged_into_other():
     y = (rng.random(n) < 0.3).astype(int)
     X = pd.DataFrame({"cat": cats})
 
-    enc = WOEEncoder(rare_threshold=0.05).fit(X, y)  # RARE is 4% < 5% -> merged
-    fw = enc.feature_woe_["cat"]
-    assert "RARE" not in fw.category_woe
-    assert set(fw.category_woe.keys()) == {"A", "B"}
+    enc = WOEEncoder(rare_threshold=0.05).fit(X, y)  # RARE is 4% < 5% -> merged into "other"
+
+    # If RARE was merged, it encodes identically to a never-seen value (both "other").
+    # If it had been kept as its own level, the two would differ.
+    out = enc.transform(pd.DataFrame({"cat": ["RARE", "NEVER_SEEN"]}))[:, 0]
+    assert out[0] == pytest.approx(out[1])
 
 
 # --------------------------------------------------------------------------- #
@@ -167,13 +170,16 @@ def test_missing_values_get_separate_bin():
     X = pd.DataFrame({"num": x})
 
     enc = WOEEncoder().fit(X, y)
-    fw = enc.feature_woe_["num"]
-    # NaN rows are riskier -> NaN WOE should be negative (fewer goods)
-    assert fw.nan_woe < 0.0
-
-    out = enc.transform(X)
-    assert out[:100, 0] == pytest.approx(fw.nan_woe)
+    out = enc.transform(X)[:, 0]
     assert np.isfinite(out).all()
+
+    nan_woe, non_nan_woe = out[:100], out[100:]
+    # all NaN rows share one dedicated WOE bin
+    assert np.allclose(nan_woe, nan_woe[0])
+    # NaN encodes distinctly from every observed non-NaN value
+    assert nan_woe[0] not in set(np.unique(non_nan_woe))
+    # the riskier NaN cohort encodes to a lower WOE than the non-NaN average
+    assert nan_woe[0] < non_nan_woe.mean()
 
 
 def test_categorical_missing_handled():
@@ -231,18 +237,20 @@ def test_constant_feature_is_useless():
 
 
 def test_out_of_range_values_clamped(credit_like_data):
-    """Values beyond the fitted range map to the edge bins, not NaN/error."""
+    """Values beyond the fitted range encode like the nearest in-range extreme."""
     X, y = credit_like_data
     enc = WOEEncoder().fit(X, y)
+    col = list(enc.get_feature_names_out()).index("cibil_score_woe")
 
-    X_new = X.head(3).copy()
-    X_new["cibil_score"] = [-999.0, 99999.0, 600.0]  # below min, above max, in range
-    out = enc.transform(X_new)
-    col = list(enc.feature_names_in_).index("cibil_score")
-    fw = enc.feature_woe_["cibil_score"]
-    assert out[0, col] == pytest.approx(fw.bin_woe[0])  # clamped to first bin
-    assert out[1, col] == pytest.approx(fw.bin_woe[-1])  # clamped to last bin
+    train_min = float(X["cibil_score"].min())
+    train_max = float(X["cibil_score"].max())
+    probe = X.head(4).copy()
+    probe["cibil_score"] = [-999.0, 99999.0, train_min, train_max]
+    out = enc.transform(probe)[:, col]
+
     assert np.isfinite(out).all()
+    assert out[0] == pytest.approx(out[2])  # below-min clamps to the min bin
+    assert out[1] == pytest.approx(out[3])  # above-max clamps to the max bin
 
 
 # --------------------------------------------------------------------------- #
@@ -305,8 +313,9 @@ def test_explicit_feature_types():
     X = pd.DataFrame({"grade": grade, "amount": amount})
 
     enc = WOEEncoder(categorical_features=["grade"]).fit(X, y)
-    assert enc.feature_woe_["grade"].kind == "categorical"
-    assert enc.feature_woe_["amount"].kind == "continuous"
+    kinds = enc.get_iv_summary().set_index("feature")["kind"]
+    assert kinds["grade"] == "categorical"
+    assert kinds["amount"] == "continuous"
 
 
 # --------------------------------------------------------------------------- #
@@ -345,3 +354,21 @@ def test_invalid_n_bins_raises(credit_like_data):
     X, y = credit_like_data
     with pytest.raises(ValueError, match="n_bins"):
         WOEEncoder(n_bins=1).fit(X, y)
+
+
+def test_forbidden_features_raises(credit_like_data):
+    """When configured (e.g. by the PD pipeline), forbidden columns block fit."""
+    X, y = credit_like_data
+    X2 = X.copy()
+    X2["state_code"] = "MH"
+    with pytest.raises(ValueError, match="Forbidden features"):
+        WOEEncoder(forbidden_features=["state_code", "gender", "religion"]).fit(X2, y)
+
+
+def test_forbidden_features_default_is_noop(credit_like_data):
+    """Default (None) allows the column — state_code is permitted for LGD."""
+    X, y = credit_like_data
+    X2 = X.copy()
+    X2["state_code"] = "MH"
+    enc = WOEEncoder().fit(X2, y)
+    assert "state_code" in enc.iv_
