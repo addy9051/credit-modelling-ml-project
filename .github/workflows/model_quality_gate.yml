@@ -1,0 +1,6 @@
+# Gini/KS/calibration gates before merge to main
+# TODO: implement per project plan §2.
+name: model_quality_gate
+on:
+  workflow_dispatch:
+jobs: {}

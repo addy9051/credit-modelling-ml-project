@@ -1,0 +1,81 @@
+# CodeRabbit configuration — STRICT review mode
+# Schema: https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+# Docs:   https://docs.coderabbit.ai/reference/configuration
+yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+
+language: en-US
+early_access: false
+
+reviews:
+  # "assertive" is CodeRabbit's strictest profile — maximum feedback, will flag nits.
+  profile: assertive
+  # Gate merges: PR is only auto-approved once all CodeRabbit comments are resolved
+  # and pre-merge checks pass. This is the strict review-blocking behaviour.
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  poem: false
+  collapse_walkthrough: false
+  suggested_labels: true
+  suggested_reviewers: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - main
+
+  # Domain-specific review guardrails for this credit-risk platform.
+  path_instructions:
+    - path: "src/**/*.py"
+      instructions: >-
+        Enforce regulatory guardrails. (1) FORBIDDEN PD features: flag any use
+        of state_code, gender, or religion as a Probability-of-Default model
+        input or feature — note state_code IS permitted for LGD models only.
+        (2) DATA LEAKAGE: WOE/IV and any fit/transform statistics must be
+        computed on the training fold only; SMOTE/ADASYN must be applied to the
+        training fold only and never to validation/test. (3) PD evaluation must
+        use out-of-time (OOT) splits per config cutoffs, never random
+        cross-validation. (4) PII: no real borrower PII (mobile, name, PAN,
+        Aadhaar) may be written to logs or committed. (5) Require type hints and
+        docstrings on public functions and classes. (6) Quality gates: trainers
+        must raise ModelQualityError when Gini/KS/calibration gates fail.
+    - path: "src/data_ingestion/bureau_connector.py"
+      instructions: >-
+        This calls the live Decentro bureau API. Verify consent=True is always
+        sent with a purpose string, the reference_id is preserved for the DPDP
+        Act audit trail, retries use exponential backoff, and no PII (mobile,
+        name, PAN) is ever logged. New-to-credit (-1 score) must map to None.
+    - path: "tests/**/*.py"
+      instructions: >-
+        Verify tests assert observable behaviour rather than implementation
+        details. Require edge-case coverage for WOE encoding, calibration, and
+        validation-metric computations.
+    - path: "**/*.{yaml,yml}"
+      instructions: >-
+        Ensure no secrets, API keys, or credentials are hard-coded in config.
+        Cross-check config keys against their usage in src/.
+
+  tools:
+    ruff:
+      enabled: true
+    gitleaks:        # secret scanning — critical given live API credentials
+      enabled: true
+    semgrep:
+      enabled: true
+    actionlint:      # GitHub Actions workflow linting
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: auto

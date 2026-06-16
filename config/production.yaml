@@ -1,0 +1,37 @@
+# Production overrides (deep-merged over base.yaml).
+# Hard quality gates from project plan Section 12. Deployment is blocked if unmet.
+project:
+  environment: production
+
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}        # resolved from env at load time
+
+feature_store:
+  offline_store: snowflake                     # or bigquery
+  online_store: redis
+  redis_host: ${REDIS_HOST}
+  redis_port: 6379
+
+models:
+  pd:
+    min_gini: 0.45                  # Retail; 0.40 for corporate
+    min_ks: 0.35
+    max_hl_pvalue_floor: 0.05       # Hosmer-Lemeshow: PASS if p > 0.05
+    calibration_tolerance: 0.20     # Actual/predicted within +/-20% per grade
+    max_psi_at_deployment: 0.10     # Score PSI vs training must be < 0.10 at launch
+    fairness_disparate_impact_min: 0.80
+    optuna_trials: 100
+  lgd:
+    min_r2_stage2: 0.40
+    max_rmse_stage1: 0.15
+  ead:
+    max_ccf_rmse: 0.15
+
+monitoring:
+  gini_degradation_retrain_pp: 5.0
+  psi_alert: 0.25
+  psi_retrain: 0.40
+  calibration_ratio_max: 1.30       # actual rate > 1.3x predicted -> review
+
+data:
+  synthetic_n_loans: 500000

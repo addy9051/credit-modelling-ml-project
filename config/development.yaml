@@ -1,0 +1,28 @@
+# Development overrides (deep-merged over base.yaml).
+# Looser thresholds and local endpoints for fast iteration.
+project:
+  environment: development
+
+mlflow:
+  tracking_uri: http://localhost:5000
+
+feature_store:
+  offline_store: parquet
+  online_store: redis
+  redis_host: localhost
+  redis_port: 6379
+
+models:
+  pd:
+    # Relaxed gates so early experiments don't hard-fail during development.
+    min_gini: 0.35
+    min_ks: 0.25
+    optuna_trials: 25            # fewer trials for quick local runs
+  lgd:
+    min_r2: 0.30
+  ead:
+    ccf_rmse_threshold: 0.20
+
+data:
+  # Smaller synthetic portfolio for fast local generation.
+  synthetic_n_loans: 50000

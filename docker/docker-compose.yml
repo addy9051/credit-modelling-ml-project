@@ -1,0 +1,3 @@
+# Local dev stack: fastapi, mlflow, postgresql, redis, airflow, prometheus, grafana.
+# TODO: implement per project plan §9.3 with health checks and named volumes.
+services: {}

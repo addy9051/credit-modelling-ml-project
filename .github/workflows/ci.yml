@@ -1,0 +1,6 @@
+# Lint, type-check, and unit tests on every PR
+# TODO: implement per project plan §2.
+name: ci
+on:
+  workflow_dispatch:
+jobs: {}

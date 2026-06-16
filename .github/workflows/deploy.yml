@@ -1,0 +1,6 @@
+# Build Docker image, push to registry, deploy to K8s
+# TODO: implement per project plan §2.
+name: deploy
+on:
+  workflow_dispatch:
+jobs: {}

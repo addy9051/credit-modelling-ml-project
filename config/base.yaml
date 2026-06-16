@@ -1,0 +1,130 @@
+# Shared configuration. Dev/prod files override keys via deep-merge.
+# Load order: base.yaml <- development.yaml | production.yaml
+project:
+  name: credit-risk-platform
+  version: "1.0.0"
+  random_seed: 42
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  features_dir: data/features
+  synthetic_dir: data/synthetic
+
+  # Real portfolio statistics from published disclosures.
+  # Used to calibrate synthetic data distributions.
+  portfolio_stats:
+    icici:
+      gross_npa_pct: 1.97          # Q2 FY25
+      net_npa_pct: 0.42
+      pcr_pct: 78.5
+      domestic_loan_book_cr: 1243090
+    bajaj_finance:
+      gross_npa_pct: 0.90          # FY24
+      net_npa_pct: 0.50
+      car_pct: 22.5
+      aum_mix:
+        mortgages: 0.31
+        sme: 0.14
+        commercial: 0.13
+    hdfc_bank:
+      source: "Annual Report FY25"
+
+bureau_connector:
+  provider: decentro
+  env: sandbox                     # sandbox | production (override in production.yaml)
+  timeout_seconds: 30
+  max_retries: 3
+  use_fixtures: true               # flip to false once sandbox credentials are set
+  # Fixture profiles for local development (no API key needed):
+  #   good      — CIBIL 760, clean 24-month payment history
+  #   stressed  — CIBIL 510, 3× DPD-30, 1× DPD-90 in last 24 months
+  #   ntc       — CIBIL -1, new-to-credit borrower with no bureau history
+  default_fixture_profile: good
+  consent_purpose: "Credit risk assessment for loan origination and portfolio monitoring"
+  # Fields that improve Decentro match rate (all optional; provide what's available)
+  optional_match_fields: [date_of_birth, pincode, pan]
+
+feature_store:
+  backend: feast
+  offline_store: parquet           # Switch to snowflake / bigquery in prod
+  online_store: redis
+  redis_host: localhost
+  redis_port: 6379
+
+mlflow:
+  tracking_uri: http://localhost:5000
+  experiment_name: credit-risk-pd
+  model_registry_name: CreditRiskPD
+
+models:
+  pd:
+    target_column: default_flag_12m
+    observation_window_months: 12
+    performance_window_months: 12
+    min_gini: 0.40
+    min_ks: 0.30
+    max_psi_alert: 0.25
+    max_psi_retrain: 0.40
+    calibration_tolerance: 0.20    # Actual/predicted within +/-20%
+
+  lgd:
+    target_column: lgd_realised
+    min_r2: 0.40
+    zero_recovery_threshold: 0.05  # LGD < 5% treated as full recovery
+
+  ead:
+    target_column: ead_observed
+    ccf_rmse_threshold: 0.15
+    revolving_products: [credit_card, overdraft, working_capital, cash_credit]
+
+validation:
+  train_cutoff: "2023-03-31"       # Train: up to FY23
+  validation_cutoff: "2024-03-31"  # Validate: FY24
+  test_cutoff: "2024-12-31"        # Test: FY25 Q1-Q3
+
+  stress_scenarios:
+    baseline:
+      name: "RBI Baseline Trajectory"
+      gdp_growth_delta: 0.0
+      repo_rate_delta_bps: 0
+      npa_multiplier: 1.0
+    moderate:
+      name: "Moderate Stress"
+      gdp_growth_delta: -1.5
+      repo_rate_delta_bps: 200
+      npa_multiplier: 1.5
+    severe:
+      name: "Severe Stress (COVID-equivalent)"
+      gdp_growth_delta: -5.0
+      repo_rate_delta_bps: 400
+      npa_multiplier: 3.0
+      collateral_haircut: 0.35
+
+  downturn_windows:
+    - name: "COVID Stress"
+      start: "2020-03-01"
+      end: "2021-03-31"
+    - name: "NBFC Liquidity Crisis"
+      start: "2018-09-01"
+      end: "2019-09-30"
+
+monitoring:
+  psi_alert_threshold: 0.25
+  psi_retrain_threshold: 0.40
+  ks_shift_alert: 0.20
+  gini_degradation_alert_pp: 5.0
+  api_p99_latency_ms: 100
+  api_error_rate_pct: 0.1
+  monitoring_features_top_n: 20
+
+# Regulatory guardrails (enforced in validation/fairness.py and trainer gates).
+governance:
+  required_top_features:        # must appear in top-10 SHAP importance
+    - cibil_score
+    - dpd_90_count_24m
+    - revolving_utilisation
+  forbidden_features:           # must NOT drive PD (fairness / regulatory)
+    - state_code               # allowed for LGD (legal enforcement differs)
+    - gender
+    - religion

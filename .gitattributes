@@ -1,0 +1,12 @@
+# Normalise line endings to LF in the repo (prevents CRLF churn on Windows).
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF.
+*.ps1 text eol=crlf
+
+# Binary / generated artefacts — never normalise or diff.
+*.parquet binary
+*.pkl binary
+*.joblib binary
+*.onnx binary
+*.ipynb -text

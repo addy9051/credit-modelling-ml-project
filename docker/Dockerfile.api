@@ -1,0 +1,2 @@
+# FastAPI serving container. TODO: implement per project plan §9.
+# Base off python:3.11-slim, install via uv, run uvicorn src.serving.api:app.
