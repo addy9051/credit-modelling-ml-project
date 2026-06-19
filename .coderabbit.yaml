@@ -1,7 +1,7 @@
 # CodeRabbit configuration — STRICT review mode
 # Schema: https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 # Docs:   https://docs.coderabbit.ai/reference/configuration
-yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 
 language: en-US
 early_access: false
