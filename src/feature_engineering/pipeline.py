@@ -251,7 +251,7 @@ def build_pd_feature_pipeline(
     continuous_features: Sequence[str],
     categorical_features: Sequence[str],
     *,
-    forbidden_features: Sequence[str] | None = None,
+    forbidden_features: Sequence[str] | None = PD_FORBIDDEN_FEATURES,
     n_bins: int = 10,
     iqr_k: float = 1.5,
 ) -> Pipeline:
@@ -266,10 +266,12 @@ def build_pd_feature_pipeline(
         Column names to route through numeric / categorical preprocessing.
         Typically ``PDFeatureMatrix.continuous`` / ``.categorical``.
     forbidden_features : Sequence[str] | None
-        Regulatory guardrail. If any appear in the feature lists, raises
-        ``ValueError``. For the scorecard it is also handed to the WOEEncoder as
-        a defence-in-depth fit-time guard. Pass :data:`PD_FORBIDDEN_FEATURES`
-        for PD; leave ``None`` for LGD (where ``state_code`` is allowed).
+        Regulatory guardrail, **defaulting to** :data:`PD_FORBIDDEN_FEATURES` so
+        the PD builder is fail-safe. If any appear in the feature lists, raises
+        ``ValueError``; for the scorecard it is also handed to the WOEEncoder as
+        a defence-in-depth fit-time guard. Reusing this for LGD (where
+        ``state_code`` is allowed) requires an explicit opt-out — pass
+        ``forbidden_features=()``.
     n_bins : int
         Quantile bins for the scorecard WOE encoder.
     iqr_k : float

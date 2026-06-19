@@ -294,16 +294,25 @@ def build_bureau_loader(
 
     Resolution order:
 
-    1. If ``bureau_connector.parquet_path`` is configured **and exists**, use the
-       cached :class:`ParquetBureauLoader` (preferred for training — reproducible
-       and free).
+    1. If ``bureau_connector.parquet_path`` is configured, use the cached
+       :class:`ParquetBureauLoader` (preferred for training — reproducible and
+       free). A configured-but-missing path raises rather than silently falling
+       back to billable, non-reproducible live pulls.
     2. Otherwise fall back to :class:`DecentroBureauLoader` over a client built
        from the environment. This requires ``identities`` (PII to resolve each
        borrower) and the ``ingest`` extra to be installed.
     """
     bureau_cfg = config.get("bureau_connector", {})
     parquet_path = bureau_cfg.get("parquet_path")
-    if parquet_path and Path(parquet_path).exists():
+    if parquet_path is not None:
+        # A configured path is an explicit intent to use the cache; if it is
+        # missing, fail loudly instead of switching to live Decentro pulls.
+        if not Path(parquet_path).exists():
+            raise ValueError(
+                f"bureau_connector.parquet_path is set to {parquet_path!r} but no "
+                "such file exists. Refusing to silently fall back to live Decentro "
+                "pulls (non-reproducible and billable). Fix the path or unset it."
+            )
         logger.info("Using cached bureau parquet at %s", parquet_path)
         return ParquetBureauLoader(parquet_path)
 

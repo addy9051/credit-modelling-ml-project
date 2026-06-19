@@ -41,11 +41,18 @@ BUSINESS_CATEGORICAL = [
 
 
 def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    """Elementwise ratio with non-positive / zero denominators mapped to NaN."""
+    """
+    Elementwise ratio with non-positive (zero or negative) denominators -> NaN.
+
+    Non-positive denominators are nonsensical for these financial ratios (e.g.
+    negative interest expense or liabilities), and a negative denominator would
+    flip the ratio's sign and read as deceptively healthy. Negative net worth is
+    instead surfaced explicitly by the ``negative_net_worth`` flag.
+    """
     denom = pd.to_numeric(denominator, errors="coerce")
     num = pd.to_numeric(numerator, errors="coerce")
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = num / denom.where(denom != 0)
+        ratio = num / denom.where(denom > 0)
     return ratio.replace([np.inf, -np.inf], np.nan)
 
 

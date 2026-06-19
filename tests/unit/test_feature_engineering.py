@@ -32,6 +32,7 @@ from src.feature_engineering.loaders import (
     DecentroBureauLoader,
     ParquetBureauLoader,
     ParquetTabularSource,
+    build_bureau_loader,
 )
 from src.feature_engineering.pipeline import (
     PD_FORBIDDEN_FEATURES,
@@ -341,6 +342,20 @@ def test_parquet_bureau_loader_roundtrip(tmp_path, bureau_frame):
     assert list(out.columns) == list(BUREAU_FEATURE_COLUMNS)
 
 
+def test_build_bureau_loader_selects_parquet(tmp_path, bureau_frame):
+    path = tmp_path / "bureau.parquet"
+    bureau_frame[list(BUREAU_FEATURE_COLUMNS)].to_parquet(path)
+    loader = build_bureau_loader({"bureau_connector": {"parquet_path": str(path)}})
+    assert isinstance(loader, ParquetBureauLoader)
+
+
+def test_build_bureau_loader_missing_parquet_fails_fast(tmp_path):
+    # A configured-but-missing path must raise, not silently fall back to live pulls.
+    missing = tmp_path / "does_not_exist.parquet"
+    with pytest.raises(ValueError, match="no .*such file exists|parquet_path"):
+        build_bureau_loader({"bureau_connector": {"parquet_path": str(missing)}})
+
+
 class _StubDecentroClient:
     """Minimal stand-in for DecentroClient that returns a fixed BureauFeatures."""
 
@@ -455,6 +470,15 @@ def test_scorecard_pipeline_outputs_finite_woe(assembled):
     assert out.shape == (len(assembled.X), len(assembled.feature_names))
     assert np.isfinite(out).all()
 
+    # Transform-time robustness: an unseen categorical level maps to the "other"
+    # WOE and an injected NaN maps to the dedicated NaN bin — output stays finite.
+    probe = assembled.X.head(2).copy()
+    probe[assembled.categorical[0]] = "NEVER_SEEN_LEVEL"
+    probe[assembled.continuous[0]] = np.nan
+    probe_out = pipe.transform(probe)
+    assert probe_out.shape == (len(probe), len(assembled.feature_names))
+    assert np.isfinite(probe_out).all()
+
 
 def test_tree_pipeline_no_nan(assembled):
     pipe = build_pd_feature_pipeline("tree", assembled.continuous, assembled.categorical)
@@ -501,7 +525,7 @@ def test_pipeline_joblib_roundtrip(assembled):
 
 
 def test_iqr_clipper_bounds_outliers():
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(42)
     x = rng.normal(size=(500, 2))
     x[0, 0] = 1e6  # extreme outlier
     clipper = IQRClipper(k=1.5).fit(x)
