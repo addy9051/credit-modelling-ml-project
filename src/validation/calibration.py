@@ -30,10 +30,10 @@ class HosmerLemeshowResult:
 def _validate(y_true: np.ndarray, y_prob: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     yt = np.asarray(y_true)
     yp = np.asarray(y_prob, dtype=float)
-    if yt.shape[0] != yp.shape[0]:
-        raise ValueError(f"y_true and y_prob length mismatch: {yt.shape[0]} vs {yp.shape[0]}")
     if yt.ndim != 1 or yp.ndim != 1:
         raise ValueError("y_true and y_prob must be 1-dimensional.")
+    if yt.shape[0] != yp.shape[0]:
+        raise ValueError(f"y_true and y_prob length mismatch: {yt.shape[0]} vs {yp.shape[0]}")
     if not np.isfinite(yp).all():
         raise ValueError("y_prob contains non-finite values.")
     if (yp < 0).any() or (yp > 1).any():

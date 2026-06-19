@@ -21,10 +21,10 @@ from sklearn.metrics import roc_auc_score
 def _validate(y_true: np.ndarray, y_score: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     yt = np.asarray(y_true)
     ys = np.asarray(y_score, dtype=float)
-    if yt.shape[0] != ys.shape[0]:
-        raise ValueError(f"y_true and y_score length mismatch: {yt.shape[0]} vs {ys.shape[0]}")
     if yt.ndim != 1 or ys.ndim != 1:
         raise ValueError("y_true and y_score must be 1-dimensional.")
+    if yt.shape[0] != ys.shape[0]:
+        raise ValueError(f"y_true and y_score length mismatch: {yt.shape[0]} vs {ys.shape[0]}")
     if not np.isfinite(ys).all():
         raise ValueError("y_score contains non-finite values.")
     if yt.dtype == bool:

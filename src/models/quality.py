@@ -49,6 +49,10 @@ def evaluate_pd(y_true: np.ndarray, y_prob: np.ndarray, *, hl_groups: int = 10) 
     """
     yt = np.asarray(y_true)
     yp = np.asarray(y_prob, dtype=float)
+    if hl_groups < 3:
+        # Configuration error — fail fast. Only *data-driven* HL failures
+        # (probabilities too concentrated to bin) should degrade to NaN below.
+        raise ValueError(f"hl_groups must be >= 3 for a meaningful HL test; got {hl_groups}")
     try:
         hl = hosmer_lemeshow(yt, yp, n_groups=hl_groups)
         hl_stat, hl_p = hl.statistic, hl.p_value

@@ -83,7 +83,7 @@ def test_hl_miscalibrated_rejected():
 def test_hl_rejects_too_concentrated_probs():
     y = np.r_[np.zeros(100), np.ones(100)].astype(int)
     p = np.full(200, 0.5)  # no spread -> cannot form bins
-    with pytest.raises(ValueError, match="concentrated|bins"):
+    with pytest.raises(ValueError, match=r"concentrated|bins"):
         hosmer_lemeshow(y, p, n_groups=10)
 
 

@@ -102,6 +102,14 @@ def test_evaluate_pd_bundle(credit_data):
     assert metrics.n_default == int(y.sum())
 
 
+def test_evaluate_pd_rejects_bad_hl_groups(credit_data):
+    X, y, _ = credit_data
+    model = PDScorecard(CONTINUOUS, CATEGORICAL).fit(X, y)
+    # hl_groups < 3 is a configuration error: fail fast, do not silently NaN it.
+    with pytest.raises(ValueError, match="hl_groups"):
+        evaluate_pd(y, model.predict_proba(X), hl_groups=2)
+
+
 def test_enforce_gates_pass():
     metrics = PDMetrics(
         gini=0.55,
@@ -128,7 +136,7 @@ def test_enforce_gates_fail_discrimination():
         n=1000,
         n_default=120,
     )
-    with pytest.raises(ModelQualityError, match="Gini.*min_gini"):
+    with pytest.raises(ModelQualityError, match=r"Gini.*min_gini"):
         enforce_pd_gates(metrics, min_gini=0.45, min_ks=0.35)
 
 
@@ -204,7 +212,7 @@ def test_scorecard_blocks_forbidden_feature(credit_data):
     X2["state_code"] = "MH"
     # state_code routed as a feature must trip the PD forbidden-feature guard
     model = PDScorecard(CONTINUOUS, [*CATEGORICAL, "state_code"])
-    with pytest.raises(ValueError, match="[Ff]orbidden"):
+    with pytest.raises(ValueError, match=r"[Ff]orbidden"):
         model.fit(X2, y)
 
 
