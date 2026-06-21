@@ -96,6 +96,19 @@ class PDXGBoost:
         n_jobs: int = -1,
         forbidden_features: Sequence[str] = PD_FORBIDDEN_FEATURES,
     ) -> None:
+        """
+        Initialize a PDXGBoost model with feature configuration and training settings.
+        
+        Parameters:
+            continuous_features (Sequence[str]): Column names of continuous features.
+            categorical_features (Sequence[str]): Column names of categorical features.
+            params (dict[str, Any] | None): User-provided hyperparameters, merged over defaults. Defaults to None.
+            early_stopping_rounds (int): Number of rounds for early stopping during training. Defaults to 50.
+            use_scale_pos_weight (bool): Whether to apply class-imbalance weighting. Defaults to True.
+            random_state (int): Random seed for reproducibility. Defaults to 42.
+            n_jobs (int): Number of parallel jobs. Defaults to -1.
+            forbidden_features (Sequence[str]): Feature names to exclude from preprocessing. Defaults to PD_FORBIDDEN_FEATURES.
+        """
         self.continuous_features = list(continuous_features)
         self.categorical_features = list(categorical_features)
         self.params = {**_DEFAULT_PARAMS, **(params or {})}
@@ -114,6 +127,14 @@ class PDXGBoost:
     # ------------------------------------------------------------------ #
 
     def _scale_pos_weight(self, y: np.ndarray) -> float:
+        """
+        Computes the class imbalance weight for XGBoost training.
+        
+        If class weighting is disabled, returns 1.0. Otherwise, returns the ratio of negative to positive labels in the target vector, or 1.0 if no positive labels exist.
+        
+        Returns:
+            float: The class imbalance weight.
+        """
         if not self.use_scale_pos_weight:
             return 1.0
         pos = int((y == 1).sum())
@@ -123,6 +144,17 @@ class PDXGBoost:
     def _make_clf(
         self, params: dict[str, Any], scale_pos_weight: float, early_stopping_rounds: int | None
     ) -> XGBClassifier:
+        """
+        Create an XGBoost classifier with merged hyperparameters and instance configuration.
+        
+        Parameters:
+            params (dict[str, Any]): Hyperparameters to merge with default values.
+            scale_pos_weight (float): Class weight to address data imbalance.
+            early_stopping_rounds (int | None): Early stopping threshold; None disables it.
+        
+        Returns:
+            XGBClassifier: The configured gradient booster instance.
+        """
         return XGBClassifier(
             **params,
             **_FIXED_PARAMS,
@@ -133,6 +165,12 @@ class PDXGBoost:
         )
 
     def _new_preprocess(self) -> Pipeline:
+        """
+        Create a Phase-2 preprocessing pipeline for tree-based feature engineering.
+        
+        Returns:
+            Pipeline: A scikit-learn Pipeline configured with continuous and categorical feature transformations, respecting forbidden features constraints.
+        """
         return build_pd_feature_pipeline(
             "tree",
             self.continuous_features,
@@ -175,12 +213,26 @@ class PDXGBoost:
         return self
 
     def _check_fitted(self) -> tuple[Pipeline, XGBClassifier]:
+        """
+        Verify that the model has been fitted.
+        
+        Returns:
+            tuple[Pipeline, XGBClassifier]: The fitted preprocessing pipeline and classifier.
+        
+        Raises:
+            RuntimeError: If the model has not been fitted.
+        """
         if self.preprocess_ is None or self.clf_ is None:
             raise RuntimeError("PDXGBoost is not fitted; call fit() first.")
         return self.preprocess_, self.clf_
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Return the 1-D predicted probability of **default** (positive class)."""
+        """
+        Return the predicted probability of default for each sample.
+        
+        Returns:
+            np.ndarray: 1-D array of probabilities for the positive class (default).
+        """
         preprocess, clf = self._check_fitted()
         return clf.predict_proba(preprocess.transform(X))[:, 1]
 
@@ -249,7 +301,12 @@ class PDXGBoost:
     # ------------------------------------------------------------------ #
 
     def feature_importances(self) -> pd.DataFrame:
-        """Gain-based feature importances, sorted descending (normalised to sum 1)."""
+        """
+        Return feature importances from the fitted model.
+        
+        Returns:
+        	pd.DataFrame: A DataFrame with columns 'feature' (feature name) and 'importance' (importance value), sorted by importance in descending order.
+        """
         preprocess, clf = self._check_fitted()
         importances = clf.feature_importances_
         names: list[str] = [*self.continuous_features, *self.categorical_features]
@@ -265,7 +322,15 @@ class PDXGBoost:
     def evaluate(
         self, X: pd.DataFrame, y: np.ndarray | pd.Series, *, hl_groups: int = 10
     ) -> PDMetrics:
-        """Evaluate discrimination + calibration on a fold (use the OOT test fold)."""
+        """
+        Compute discrimination and calibration metrics on a provided fold.
+        
+        Parameters:
+            hl_groups (int): Number of groups for calibration analysis. Defaults to 10.
+        
+        Returns:
+            PDMetrics: Object containing discrimination and calibration metrics.
+        """
         return evaluate_pd(np.asarray(y), self.predict_proba(X), hl_groups=hl_groups)
 
 
