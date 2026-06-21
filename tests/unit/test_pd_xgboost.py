@@ -38,6 +38,12 @@ def test_xgboost_discriminates_out_of_time(credit_data):
 
 
 def test_xgboost_predict_proba_is_probability(credit_data):
+    """
+    Verify that predict_proba outputs valid probability values.
+    
+    Checks that predictions are a 1D array of the correct length and all values
+    are within the valid probability range [0, 1].
+    """
     X, y, _ = credit_data
     model = PDXGBoost(CONTINUOUS, CATEGORICAL, **FAST).fit(X, y)
     p = model.predict_proba(X)
